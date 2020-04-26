@@ -1,6 +1,8 @@
+import BackendInterface from "./BackendInterface";
+
 export interface ICacheOptions {
     // backend is expected to have the same static interface as AsyncStorage
-    backend: any;
+    backend: BackendInterface;
     namespace: string;
     policy: ICachePolicy;
 }

@@ -1,6 +1,8 @@
-const memoryStore: any = {};
+import BackendInterface from "./BackendInterface";
 
-export default {
+const memoryStore: Record<string, string> = {};
+
+const MemoryStore: BackendInterface = {
     setItem: async (key: string, value: string): Promise<void> => {
         memoryStore[key] = value;
     },
@@ -13,8 +15,8 @@ export default {
         return memoryStore[key];
     },
 
-    multiGet: async (keys: string[]): Promise<any[][]> => {
-        const results: any[][] = [];
+    multiGet: async (keys: string[]): Promise<[string, string][]> => {
+        const results: [string, string][] = [];
         for (const key of keys) {
             results.push([key, memoryStore[key]]);
         }
@@ -32,3 +34,5 @@ export default {
         delete memoryStore[key];
     }
 };
+
+export default MemoryStore;
