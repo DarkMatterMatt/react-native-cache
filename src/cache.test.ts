@@ -60,11 +60,14 @@ describe("cache", () => {
     it("can get all elements", async () => {
         const entries = await cache.getAll();
 
-        expect(entries).not.toBeUndefined();
-        expect(Object.keys(entries).length).toBe(1);
+        expect(entries.length).toBe(1);
 
-        const key2Entry = entries["key2:key2"];
-        expect(key2Entry["value"]).toBe("value2");
+        const entry2 = entries.find(e => e[0] === "key2:key2");
+        
+        expect(entry2).not.toBeUndefined();
+        if (entry2 !== undefined) {
+            expect(entry2[1]).toBe("value2");
+        }
     });
 
     it("can clear all elements", async () => {
@@ -72,6 +75,17 @@ describe("cache", () => {
 
         const entries = await cache.getAll();
 
-        expect(Object.keys(entries).length).toBe(0);
+        expect(entries.length).toBe(0);
+    });
+
+    it("can remove multiple items", async () => {
+        await cache.set("key1", "value1");
+        const value = await cache.peek("key1");
+        expect(value).toBe("value1");
+
+        cache.multiRemove(["key1"]);
+        const entries = await cache.getAll();
+
+        expect(entries.length).toBe(0);
     });
 });

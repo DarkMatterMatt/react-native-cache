@@ -28,7 +28,7 @@ export default class Cache implements BackendInterface {
     public async getAllKeys() {
         const keys = await this.backend.getAllKeys();
         return keys
-            .filter(k => k.startsWith(this.namespace))
+            .filter(k => k.startsWith(this.namespace) && k !== this.getLRUKey())
             .map(k => this.fromCompositeKey(k));
     }
 
@@ -36,15 +36,8 @@ export default class Cache implements BackendInterface {
      * Sets value for key
      */
     public async setItem(key: string, value: string): Promise<void> {
-        const entry = {
-            created: new Date(),
-            value
-        };
-
         const compositeKey = this.makeCompositeKey(key);
-        const entryString = JSON.stringify(entry);
-
-        await this.backend.setItem(compositeKey, entryString);
+        await this.backend.setItem(compositeKey, value);
         await this.refreshLRU(key);
         return this.enforceLimits();
     }
@@ -148,40 +141,14 @@ export default class Cache implements BackendInterface {
     }
 
     public async getAll() {
-        const keys = await this.backend.getAllKeys();
-        const namespaceKeys = keys.filter((key: string) => {
-            return key.substr(0, this.namespace.length) === this.namespace;
-        });
-
-        const results = await this.backend.multiGet(namespaceKeys);
-        const allEntries: { [key: string]: any } = {};
-        for (const [compositeKey, value] of results) {
-            const key = this.fromCompositeKey(compositeKey);
-
-            if (key === "_lru") {
-                continue;
-            }
-
-            allEntries[key] = JSON.parse(value);
-        }
-
-        return allEntries;
+        const keys = await this.getAllKeys();
+        const results = await this.multiGet(keys);
+        return results;
     }
 
-    public async peek(key: string): Promise<string | undefined> {
+    public async peek(key: string) {
         const compositeKey = this.makeCompositeKey(key);
-        const entryJsonString = await this.backend.getItem(compositeKey);
-
-        let entry;
-        if (entryJsonString) {
-            entry = JSON.parse(entryJsonString);
-        }
-
-        let value;
-        if (entry) {
-            value = entry.value;
-        }
-
+        const value = await this.backend.getItem(compositeKey);
         return value;
     }
 
