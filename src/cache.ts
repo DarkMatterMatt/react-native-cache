@@ -98,7 +98,7 @@ export default class Cache implements BackendInterface {
     }
 
     /**
-     * Delete all the keys in the keys array.
+     * Delete all the keys in the keys array
      * @returns An array of [key, value] pairs in the form: [['k1', 'val1'], ['k2', 'val2']]
      */
     public async multiRemove(keys: string[]) {
@@ -109,18 +109,33 @@ export default class Cache implements BackendInterface {
         await this.backend.multiRemove(compositeKeys);
     }
 
+    /**
+     * Delete all the keys in the cache
+     */
     public async clearAll() {
-        const keys = await this.backend.getAllKeys();
-        const namespaceKeys = keys.filter((key: string) => {
-            return key.substr(0, this.namespace.length) === this.namespace;
-        });
-
-        await this.backend.multiRemove(namespaceKeys);
-
-        return this.setLRU([]);
+        const keys = await this.getAllKeys();
+        const results = await this.multiRemove(keys);
     }
 
-    public async enforceLimits(): Promise<void> {
+    /**
+     * Delete all the keys in the cache
+     */
+    public async getAll() {
+        const keys = await this.getAllKeys();
+        const results = await this.multiGet(keys);
+        return results;
+    }
+
+    /**
+     * Fetches value for key without updating position in LRU list
+     */
+    public async peek(key: string) {
+        const compositeKey = this.makeCompositeKey(key);
+        const value = await this.backend.getItem(compositeKey);
+        return value;
+    }
+
+    protected async enforceLimits(): Promise<void> {
         if (!this.policy.maxEntries) {
             return;
         }
@@ -138,18 +153,6 @@ export default class Cache implements BackendInterface {
 
         const survivorList = lru.slice(victimCount);
         return this.setLRU(survivorList);
-    }
-
-    public async getAll() {
-        const keys = await this.getAllKeys();
-        const results = await this.multiGet(keys);
-        return results;
-    }
-
-    public async peek(key: string) {
-        const compositeKey = this.makeCompositeKey(key);
-        const value = await this.backend.getItem(compositeKey);
-        return value;
     }
 
     protected async addToLRU(key: string) {
