@@ -12,7 +12,7 @@ export interface ICachePolicy {
 }
 
 export default class Cache {
-    protected backend: any;
+    protected backend: BackendInterface;
     protected namespace: string;
     protected policy: ICachePolicy;
 
