@@ -11,14 +11,14 @@ const MemoryStore: BackendInterface = {
         return Object.keys(memoryStore);
     },
 
-    getItem: async (key: string): Promise<string> => {
-        return memoryStore[key];
+    getItem: async (key: string): Promise<string | null> => {
+        return memoryStore[key] ?? null;
     },
 
     multiGet: async (keys: string[]): Promise<[string, string][]> => {
         const results: [string, string][] = [];
         for (const key of keys) {
-            results.push([key, memoryStore[key]]);
+            results.push([key, memoryStore[key] ?? null]);
         }
 
         return results;

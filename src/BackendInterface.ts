@@ -3,6 +3,6 @@ export default interface BackendInterface {
     setItem: (key: string, value: string) => Promise<void>;
     getItem: (key: string) => Promise<string | null>;
     removeItem: (key: string) => Promise<void>
-    multiGet: (keys: string[]) => Promise<[string, string][]>;
+    multiGet: (keys: string[]) => Promise<[string, string | null][]>;
     multiRemove: (keys: string[]) => Promise<void>;
 }
