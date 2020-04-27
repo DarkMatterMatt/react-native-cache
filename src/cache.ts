@@ -11,7 +11,7 @@ export interface ICachePolicy {
     maxEntries: number;
 }
 
-export default class Cache {
+export default class Cache implements BackendInterface {
     protected backend: BackendInterface;
     protected namespace: string;
     protected policy: ICachePolicy;
@@ -20,6 +20,100 @@ export default class Cache {
         this.namespace = options.namespace;
         this.backend = options.backend;
         this.policy = options.policy;
+    }
+
+    /**
+     * Fetches all keys in cache
+     */
+    public async getAllKeys() {
+        const keys = await this.backend.getAllKeys();
+        return keys
+            .filter(k => k.startsWith(this.namespace))
+            .map(k => this.fromCompositeKey(k));
+    }
+
+    /**
+     * Sets value for key
+     */
+    public async setItem(key: string, value: string): Promise<void> {
+        const entry = {
+            created: new Date(),
+            value
+        };
+
+        const compositeKey = this.makeCompositeKey(key);
+        const entryString = JSON.stringify(entry);
+
+        await this.backend.setItem(compositeKey, entryString);
+        await this.refreshLRU(key);
+        return this.enforceLimits();
+    }
+
+    /**
+     * @deprecated Use setItem instead
+     */
+    public set = this.setItem
+
+    /**
+     * Fetches value for key
+     */
+    public async getItem(key: string): Promise<string | null> {
+        const value = await this.peek(key);
+
+        if (!value) {
+            return null;
+        }
+
+        this.refreshLRU(key);
+
+        return value;
+    }
+
+    /**
+     * @deprecated Use getItem instead
+     */
+    public async get(key: string): Promise<string | undefined> {
+        return await this.getItem(key) || undefined;
+    }
+
+    /**
+     * Removes key from the cache
+     */
+    public async removeItem(key: string): Promise<void> {
+        const compositeKey = this.makeCompositeKey(key);
+        await this.backend.removeItem(compositeKey);
+
+        await this.removeFromLRU(key);
+    }
+
+    /**
+     * @deprecated Use removeItem instead
+     */
+    public remove = this.removeItem
+
+    /**
+     * Fetches values for keys
+     * @returns An array of [key, value] pairs in the form: [['k1', 'val1'], ['k2', 'val2']]
+     */
+    public async multiGet(keys: string[]): Promise<[string, string][]> {
+        // TODO: optimize into one call
+        keys.map(k => this.refreshLRU(k));
+
+        const compositeKeys = keys.map(k => this.makeCompositeKey(k));
+        const results = await this.backend.multiGet(compositeKeys);
+        return results.map(([k, v]) => [this.fromCompositeKey(k), v]);
+    }
+
+    /**
+     * Delete all the keys in the keys array.
+     * @returns An array of [key, value] pairs in the form: [['k1', 'val1'], ['k2', 'val2']]
+     */
+    public async multiRemove(keys: string[]) {
+        // TODO: optimize into one call
+        keys.map(k => this.removeFromLRU(k));
+
+        const compositeKeys = keys.map(k => this.makeCompositeKey(k));
+        await this.backend.multiRemove(compositeKeys);
     }
 
     public async clearAll() {
@@ -74,18 +168,6 @@ export default class Cache {
         return allEntries;
     }
 
-    public async get(key: string): Promise<string | undefined> {
-        const value = await this.peek(key);
-
-        if (!value) {
-            return;
-        }
-
-        this.refreshLRU(key);
-
-        return value;
-    }
-
     public async peek(key: string): Promise<string | undefined> {
         const compositeKey = this.makeCompositeKey(key);
         const entryJsonString = await this.backend.getItem(compositeKey);
@@ -101,27 +183,6 @@ export default class Cache {
         }
 
         return value;
-    }
-
-    public async remove(key: string): Promise<void> {
-        const compositeKey = this.makeCompositeKey(key);
-        await this.backend.removeItem(compositeKey);
-
-        return this.removeFromLRU(key);
-    }
-
-    public async set(key: string, value: string): Promise<void> {
-        const entry = {
-            created: new Date(),
-            value
-        };
-
-        const compositeKey = this.makeCompositeKey(key);
-        const entryString = JSON.stringify(entry);
-
-        await this.backend.setItem(compositeKey, entryString);
-        await this.refreshLRU(key);
-        return this.enforceLimits();
     }
 
     protected async addToLRU(key: string) {
