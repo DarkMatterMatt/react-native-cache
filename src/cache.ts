@@ -11,6 +11,14 @@ export interface ICachePolicy {
     maxEntries: number;
 }
 
+// LRU contains [[key1, size1], [key2, size2]]
+type LRU = [string, number][];
+
+interface Metadata {
+    lru: LRU;
+    size: number;
+}
+
 export default class Cache implements BackendInterface {
     protected backend: BackendInterface;
     protected namespace: string;
@@ -22,13 +30,18 @@ export default class Cache implements BackendInterface {
         this.policy = options.policy;
     }
 
+    protected static calculateSize(compositeKey: string, value: string) {
+        // each character is two bytes
+        return 2 * (compositeKey.length + value.length);
+    }
+
     /**
      * Fetches all keys in cache
      */
     public async getAllKeys() {
         const keys = await this.backend.getAllKeys();
         return keys
-            .filter(k => k.startsWith(this.namespace) && k !== this.getLRUKey())
+            .filter(k => k.startsWith(this.namespace) && k !== this.getMetadataKey())
             .map(k => this.fromCompositeKey(k));
     }
 
@@ -37,9 +50,11 @@ export default class Cache implements BackendInterface {
      */
     public async setItem(key: string, value: string): Promise<void> {
         const compositeKey = this.makeCompositeKey(key);
+        const size = Cache.calculateSize(compositeKey, value);
+
         await this.backend.setItem(compositeKey, value);
-        await this.refreshLRU(key);
-        return this.enforceLimits();
+        await this.addToMetadata([key, size]);
+        await this.enforceLimits();
     }
 
     /**
@@ -53,11 +68,9 @@ export default class Cache implements BackendInterface {
     public async getItem(key: string): Promise<string | null> {
         const value = await this.peek(key);
 
-        if (!value) {
-            return null;
+        if (value !== null) {
+            this.refreshLRU(key);
         }
-
-        this.refreshLRU(key);
 
         return value;
     }
@@ -66,7 +79,7 @@ export default class Cache implements BackendInterface {
      * @deprecated Use getItem instead
      */
     public async get(key: string): Promise<string | undefined> {
-        return await this.getItem(key) || undefined;
+        return await this.getItem(key) ?? undefined;
     }
 
     /**
@@ -75,8 +88,7 @@ export default class Cache implements BackendInterface {
     public async removeItem(key: string): Promise<void> {
         const compositeKey = this.makeCompositeKey(key);
         await this.backend.removeItem(compositeKey);
-
-        await this.removeFromLRU(key);
+        await this.removeFromMetadata(key);
     }
 
     /**
@@ -88,12 +100,10 @@ export default class Cache implements BackendInterface {
      * Fetches values for keys
      * @returns An array of [key, value] pairs in the form: [['k1', 'val1'], ['k2', 'val2']]
      */
-    public async multiGet(keys: string[]): Promise<[string, string][]> {
-        // TODO: optimize into one call
-        keys.map(k => this.refreshLRU(k));
-
+    public async multiGet(keys: string[]): Promise<[string, string | null][]> {
         const compositeKeys = keys.map(k => this.makeCompositeKey(k));
         const results = await this.backend.multiGet(compositeKeys);
+        await this.refreshLRU(...keys);
         return results.map(([k, v]) => [this.fromCompositeKey(k), v]);
     }
 
@@ -102,9 +112,7 @@ export default class Cache implements BackendInterface {
      * @returns An array of [key, value] pairs in the form: [['k1', 'val1'], ['k2', 'val2']]
      */
     public async multiRemove(keys: string[]) {
-        // TODO: optimize into one call
-        keys.map(k => this.removeFromLRU(k));
-
+        await this.removeFromMetadata(...keys);
         const compositeKeys = keys.map(k => this.makeCompositeKey(k));
         await this.backend.multiRemove(compositeKeys);
     }
@@ -118,7 +126,7 @@ export default class Cache implements BackendInterface {
     }
 
     /**
-     * Delete all the keys in the cache
+     * Fetch all the keys in the cache
      */
     public async getAll() {
         const keys = await this.getAllKeys();
@@ -135,51 +143,6 @@ export default class Cache implements BackendInterface {
         return value;
     }
 
-    protected async enforceLimits(): Promise<void> {
-        if (!this.policy.maxEntries) {
-            return;
-        }
-
-        const lru = await this.getLRU();
-        const victimCount = Math.max(0, lru.length - this.policy.maxEntries);
-        const victimList = lru.slice(0, victimCount);
-
-        const removePromises = [];
-        for (const victimKey of victimList) {
-            removePromises.push(this.remove(victimKey));
-        }
-
-        await Promise.all(removePromises);
-
-        const survivorList = lru.slice(victimCount);
-        return this.setLRU(survivorList);
-    }
-
-    protected async addToLRU(key: string) {
-        const lru = await this.getLRU();
-
-        lru.push(key);
-
-        return this.setLRU(lru);
-    }
-
-    protected async getLRU() {
-        const lruString = await this.backend.getItem(this.getLRUKey());
-        let lru: string[];
-
-        if (!lruString) {
-            lru = [];
-        } else {
-            lru = JSON.parse(lruString);
-        }
-
-        return lru;
-    }
-
-    protected getLRUKey() {
-        return this.makeCompositeKey("_lru");
-    }
-
     protected makeCompositeKey(key: string) {
         return `${this.namespace}:${key}`;
     }
@@ -188,22 +151,103 @@ export default class Cache implements BackendInterface {
         return compositeKey.slice(this.namespace.length + 1);
     }
 
-    protected async refreshLRU(key: string) {
-        await this.removeFromLRU(key);
-        return this.addToLRU(key);
+    protected getMetadataKey() {
+        return this.makeCompositeKey("_metadata");
     }
 
-    protected async removeFromLRU(key: string) {
-        const lru = await this.getLRU();
+    protected async enforceLimits(): Promise<void> {
+        if (!this.policy.maxEntries) {
+            return;
+        }
 
-        const newLRU = lru.filter((item: string) => {
-            return item !== key;
-        });
+        const metadata = await this.getMetadata();
+        let metadataUpdated = false;
 
-        return this.setLRU(newLRU);
+        if (this.policy.maxEntries) {
+            const victimCount = metadata.lru.length - this.policy.maxEntries;
+            if (victimCount > 0) {
+                const victimList = metadata.lru.splice(0, victimCount);
+                await this.backend.multiRemove(victimList.map(([k, s]) => this.makeCompositeKey(k)));
+                for (const [vKey, vSize] of victimList) {
+                    metadata.size -= vSize;
+                }
+                metadataUpdated = true;
+            }
+        }
+
+        if (metadataUpdated) {
+            await this.setMetadata(metadata);
+        }
     }
 
-    protected async setLRU(lru: string[]) {
-        return this.backend.setItem(this.getLRUKey(), JSON.stringify(lru));
+    protected async getMetadata(): Promise<Metadata> {
+        const metadataStr = await this.backend.getItem(this.getMetadataKey());
+        if (metadataStr === null) {
+            return {
+                lru: [],
+                size: 0,
+            };
+        }
+        return JSON.parse(metadataStr) as Metadata;
+    }
+
+    protected async setMetadata(metadata: Metadata) {
+        await this.backend.setItem(this.getMetadataKey(), JSON.stringify(metadata));
+    }
+
+    protected async addToMetadata(...entries: [string, number][]) {
+        const metadata = await this.getMetadata();
+
+        for (const [key, size] of entries) {
+            // fetch and remove existing elem from LRU
+            const idx = metadata.lru.findIndex(([k, s]) => k === key);
+            if (idx !== -1) {
+                const [[k, s]] = metadata.lru.splice(idx, 1);
+                metadata.size -= s;
+            }
+
+            metadata.size += size;
+            metadata.lru.push([key, size]);
+        }
+
+        await this.setMetadata(metadata);
+    }
+
+    protected async refreshLRU(...keys: string[]) {
+        const metadata = await this.getMetadata();
+        let metadataUpdated = false;
+
+        for (const key of keys) {
+            // find index in LRU, get elem and remove from LRU, then add elem to the end
+            const idx = metadata.lru.findIndex(([k, s]) => k === key);
+            if (idx !== -1) {
+                const [elem] = metadata.lru.splice(idx, 1);
+                metadata.lru.push(elem);
+                metadataUpdated = true;
+            }
+        }
+
+        if (metadataUpdated) {
+            await this.setMetadata(metadata);
+        }
+    }
+
+    protected async removeFromMetadata(...keys: string[]) {
+        const metadata = await this.getMetadata();
+        let metadataUpdated = false;
+
+        for (const key of keys) {
+            // find index in LRU, get [key, size] and remove from LRU
+            const idx = metadata.lru.findIndex(([k, s]) => k === key);
+            if (idx !== -1) {
+                const [[k, s]] = metadata.lru.splice(idx, 1);
+                metadata.size -= s;
+                metadataUpdated = true;
+            }
+        }
+
+        if (metadataUpdated) {
+            await this.setMetadata(metadata);
+        }
     }
 }

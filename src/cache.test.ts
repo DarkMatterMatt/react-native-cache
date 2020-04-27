@@ -83,7 +83,7 @@ describe("cache", () => {
         const value = await cache.peek("key1");
         expect(value).toBe("value1");
 
-        cache.multiRemove(["key1"]);
+        await cache.multiRemove(["key1"]);
         const entries = await cache.getAll();
 
         expect(entries.length).toBe(0);
