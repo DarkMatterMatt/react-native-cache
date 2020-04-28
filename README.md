@@ -25,6 +25,7 @@ const cache = new Cache({
     namespace: "myapp",
     policy: {
         maxEntries: 50000
+        // maxSize: 5 * 1024 * 1024 // 5MB max cache size
     },
     backend: AsyncStorage
 });
@@ -73,11 +74,10 @@ You can look at all of the elements in the cache without updating its position i
 ```javascript
 const entries = await cache.getAll();
 console.dir(entries);
-// {
-//     "key1": { "value": 42 }
-//     "key2": { "value": 2 }
-//     ...
-// }
+// [
+//    ["key1", "42"],
+//    ["key2", "val2"],
+// ]
 ```
 
 ### Clearing all of the elements in the cache

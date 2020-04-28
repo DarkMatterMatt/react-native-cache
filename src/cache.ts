@@ -1,4 +1,5 @@
 import BackendInterface from "./BackendInterface";
+import byteLength from "./helpers";
 
 export interface ICacheOptions {
     // backend is expected to have the same static interface as AsyncStorage
@@ -8,7 +9,8 @@ export interface ICacheOptions {
 }
 
 export interface ICachePolicy {
-    maxEntries: number;
+    maxEntries?: number;
+    maxSize?: number;
 }
 
 // LRU contains [[key1, size1], [key2, size2]]
@@ -30,9 +32,9 @@ export default class Cache implements BackendInterface {
         this.policy = options.policy;
     }
 
-    protected static calculateSize(compositeKey: string, value: string) {
-        // each character is two bytes
-        return 2 * (compositeKey.length + value.length);
+    protected static calculateSize(...strings: string[]) {
+        // sum the number of bytes of the input strings
+        return strings.reduce((a, b) => a + byteLength(b), 0);
     }
 
     /**
@@ -51,6 +53,11 @@ export default class Cache implements BackendInterface {
     public async setItem(key: string, value: string): Promise<void> {
         const compositeKey = this.makeCompositeKey(key);
         const size = Cache.calculateSize(compositeKey, value);
+
+        if (this.policy.maxSize && size > this.policy.maxSize) {
+            // we can't fit this in the cache
+            return;
+        }
 
         await this.backend.setItem(compositeKey, value);
         await this.addToMetadata([key, size]);
@@ -143,6 +150,14 @@ export default class Cache implements BackendInterface {
         return value;
     }
 
+    /**
+     * Fetches current size of cache
+     */
+    public async getSize() {
+        const metadata = await this.getMetadata();
+        return metadata.size + Cache.calculateSize(this.getMetadataKey(), JSON.stringify(metadata));
+    }
+
     protected makeCompositeKey(key: string) {
         return `${this.namespace}:${key}`;
     }
@@ -156,26 +171,35 @@ export default class Cache implements BackendInterface {
     }
 
     protected async enforceLimits(): Promise<void> {
-        if (!this.policy.maxEntries) {
+        if (!this.policy.maxEntries && !this.policy.maxSize) {
             return;
         }
 
         const metadata = await this.getMetadata();
-        let metadataUpdated = false;
+        const victimKeys: string[] = [];
 
         if (this.policy.maxEntries) {
             const victimCount = metadata.lru.length - this.policy.maxEntries;
             if (victimCount > 0) {
-                const victimList = metadata.lru.splice(0, victimCount);
-                await this.backend.multiRemove(victimList.map(([k, s]) => this.makeCompositeKey(k)));
-                for (const [vKey, vSize] of victimList) {
+                const victims = metadata.lru.splice(0, victimCount);
+                for (const [vKey, vSize] of victims) {
+                    victimKeys.push(vKey);
                     metadata.size -= vSize;
                 }
-                metadataUpdated = true;
             }
         }
 
-        if (metadataUpdated) {
+        if (this.policy.maxSize) {
+            const metadataSize = Cache.calculateSize(this.getMetadataKey(), JSON.stringify(metadata));
+            while (metadata.size + metadataSize > this.policy.maxSize && metadata.lru.length > 0) {
+                const [[vKey, vSize]] = metadata.lru.splice(0, 1);
+                victimKeys.push(vKey);
+                metadata.size -= vSize;
+            }
+        }
+
+        if (victimKeys.length > 0) {
+            await this.backend.multiRemove(victimKeys.map(k => this.makeCompositeKey(k)));
             await this.setMetadata(metadata);
         }
     }

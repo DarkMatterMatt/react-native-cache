@@ -32,7 +32,10 @@ const MemoryStore: BackendInterface = {
 
     removeItem: async (key: string): Promise<void> => {
         delete memoryStore[key];
-    }
+    },
+
+    // @ts-ignore: used for testing size of memoryStore
+    _getUnderlyingObject: () => memoryStore,
 };
 
 export default MemoryStore;
