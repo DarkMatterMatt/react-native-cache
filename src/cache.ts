@@ -66,9 +66,14 @@ export default class Cache implements BackendInterface {
             return;
         }
 
-        const metadata = await this.getMetadata();
+        const metadataAndSize = await this.getMetadataAndSize();
+        const [metadata] = metadataAndSize;
+        let [, metadataSize] = metadataAndSize;
+
         await this.addToMetadata(metadata, [key, size]);
-        await this.enforceLimits(metadata);
+        metadataSize += Cache.calculateSize(JSON.stringify([key, size])) + 2; // +1 for the comma, +1 for an additional size digit
+
+        await this.enforceLimits(metadata, metadataSize);
         await this.setMetadata(metadata);
 
         // sometimes we can't fit it in the cache, enforceLimits deletes everything
@@ -182,8 +187,8 @@ export default class Cache implements BackendInterface {
      * Fetches current size of cache
      */
     public async getSize() {
-        const metadata = await this.getMetadata();
-        return metadata.size + Cache.calculateSize(this.getMetadataKey(), JSON.stringify(metadata));
+        const [metadata, metadataSize] = await this.getMetadataAndSize();
+        return metadata.size + metadataSize;
     }
 
     /**
@@ -211,7 +216,7 @@ export default class Cache implements BackendInterface {
      * Enforce cache policy by evicting items
      * @returns number of items evicted 
      */
-    protected async enforceLimits(metadata: Metadata) {
+    protected async enforceLimits(metadata: Metadata, metadataSize: number) {
         if (!this.policy.maxEntries && !this.policy.maxSize) {
             return 0;
         }
@@ -230,11 +235,11 @@ export default class Cache implements BackendInterface {
         }
 
         if (this.policy.maxSize) {
-            const metadataSize = Cache.calculateSize(this.getMetadataKey(), JSON.stringify(metadata));
             while (metadata.size + metadataSize > this.policy.maxSize && metadata.lru.length > 0) {
                 const [[vKey, vSize]] = metadata.lru.splice(0, 1);
                 victimKeys.push(vKey);
                 metadata.size -= vSize;
+                metadataSize -= Cache.calculateSize(JSON.stringify([vKey, vSize])) + 1; // +1 for the comma
             }
         }
 
@@ -245,9 +250,21 @@ export default class Cache implements BackendInterface {
     }
 
     /**
+     * Fetch cache metadata and current size
+     */
+    protected async getMetadataAndSize(): Promise<[Metadata, number]> {
+        const metadataKey = this.getMetadataKey();
+        let metadataStr = await this.backend.getItem(metadataKey);
+        if (metadataStr === null) {
+            metadataStr = '{"lru":[],"size":0}';
+        }
+        return [JSON.parse(metadataStr) as Metadata, Cache.calculateSize(metadataKey, metadataStr)];
+    }
+
+    /**
      * Fetch cache metadata
      */
-    protected async getMetadata(): Promise<Metadata> {
+    protected async getMetadata() {
         const metadataStr = await this.backend.getItem(this.getMetadataKey());
         if (metadataStr === null) {
             return {
