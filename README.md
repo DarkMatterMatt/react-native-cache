@@ -2,15 +2,25 @@
 
 LRU cache built on top of the [React Native communities' AsyncStorage v2](https://github.com/react-native-community/async-storage/tree/master) (or included MemoryStore) and automatic pruning of least recently used items.
 
+This is a fork of Tim Park's [react-native-cache](https://github.com/timfpark/react-native-cache). Compared to the original, this fork features:
+
+* Ability to limit cache to size in bytes
+
 ## Installation
 
-* Run the following command.
+Install using npm:
 
 ```shell
-npm install --save react-native-cache
+npm install --save darkmattermatt/react-native-cache#v3.0.0
 ```
 
-* Import the library.
+Or, using yarn:
+
+```shell
+yarn add https://github.com/darkmattermatt/react-native-cache#v3.0.0
+```
+
+Import the library:
 
 ```javascript
 import { Cache } from "react-native-cache";

@@ -12,14 +12,14 @@
     },
     "repository": {
         "type": "git",
-        "url": "git+ssh://git@github.com/timfpark/react-native-cache.git"
+        "url": "git+ssh://git@github.com/darkmattermatt/react-native-cache.git"
     },
-    "author": "Tim Park",
+    "author": "Matt Moran",
     "license": "MIT",
     "bugs": {
-        "url": "https://github.com/timfpark/react-native-cache/issues"
+        "url": "https://github.com/darkmattermatt/react-native-cache/issues"
     },
-    "homepage": "https://github.com/timfpark/react-native-cache#readme",
+    "homepage": "https://github.com/darkmattermatt/react-native-cache#readme",
     "devDependencies": {
         "@babel/preset-typescript": "^7.9.0",
         "@types/jest": "^25.1.4",
