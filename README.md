@@ -4,13 +4,13 @@ LRU cache built on top of the [React Native communities' AsyncStorage v2](https:
 
 ## Installation
 
-*   Run the following command.
+* Run the following command.
 
 ```shell
 npm install --save react-native-cache
 ```
 
-*   Import the library.
+* Import the library.
 
 ```javascript
 import { Cache } from "react-native-cache";
@@ -18,14 +18,14 @@ import { Cache } from "react-native-cache";
 
 ## Usage
 
-You initialize a cache using the following.
+Initialize a cache using the following:
 
 ```javascript
 const cache = new Cache({
     namespace: "myapp",
     policy: {
-        maxEntries: 50000
-        // maxSize: 5 * 1024 * 1024 // 5MB max cache size
+        maxEntries: 50000,       // all policies are optional
+        maxSize: 5 * 1024 * 1024 // 5MB max cache size
     },
     backend: AsyncStorage
 });
